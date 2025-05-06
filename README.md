@@ -44,7 +44,7 @@ The images used in this section may be found in the [Images](Images) folder.
 
 ### 4.7.1 Evaluation of Low-rank Tensor Completion for Images
 
-[ratioS_calculator.m](ratioS_calculator.m) contains the codes used to calculate the ratio S and the RSE for various images from [Images](Images) for Figure 11 in section 4.7.1. An interactive plot of Figure 11 may be found [here](https://tensormethodsinstatistics.github.io/PartIIIEssay/SvsRSE.html).
+[ratioS_calculator.m](ratioS_calculator.m) contains the codes used to calculate the ratio S and the RSE for various images from [Images](Images) for Figure 11 in section 4.7.1. An interactive plot of Figure 11 may be found [here](https://tensormethodsinstatistics.github.io/Essay/SvsRSE.html).
 
 ## References
 
