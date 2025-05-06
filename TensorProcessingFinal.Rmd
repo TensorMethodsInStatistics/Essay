@@ -1,0 +1,140 @@
+```{r}
+library(dplyr)
+library(tidyr)
+library(rTensor)
+library(ggplot2)
+```
+
+```{r}
+# install.packages("readxl")
+library(readxl)
+stemcelldata <- read_excel("Post-transplant data_anonymised.xlsx")
+```
+
+```{r}
+raw_subset <- stemcelldata[c("PATIENT_ID", "ITEM_NAME","VALUE")]
+raw_subset$ITEM_NAME[which(raw_subset$ITEM_NAME == "Magnesium;")] <- "Magnesium"
+```
+
+```{r}
+raw_subset[!complete.cases(raw_subset),] # 3 rows with NAs
+
+remove_ids <- c("K306649", "K355239", "V123701")
+
+raw_subset <- raw_subset[!(raw_subset$PATIENT_ID %in% remove_ids), ] # remove NAs
+
+processed_subset <- raw_subset %>%
+  group_by(PATIENT_ID, ITEM_NAME) %>%
+  summarise(VALUES = list(VALUE), .groups = "drop")
+
+head(processed_subset)
+```
+
+```{r}
+data_date <- stemcelldata[c("PATIENT_ID", "ITEM_NAME", "VALUE", "TRANSPLANT_DTTM", "OBSERVATION_DTTM", "DISCHARGE_DATE")]
+
+data_date[!complete.cases(data_date),]
+
+remove_from_data_date <- c("K306649", "K355239", "V123701") # remove same 3 NAs
+
+data_date <- data_date[!(data_date$PATIENT_ID %in% remove_from_data_date), ]
+```
+
+```{r}
+# clean dates
+
+reformat_date <- function(datechar){
+  datechar <- sub(" 00.00.00.000000000 GMT$", "", datechar)
+  datechar <- paste(datechar, "00:00:00")
+  return(datechar)
+}
+
+cleaned_dates <- sapply(data_date$TRANSPLANT_DTTM, reformat_date)
+
+asdates <- as.POSIXct(cleaned_dates, format="%d-%b-%y %H:%M:%S", tz="UTC")
+
+data_date$TRANSPLANT_DTTM <- asdates
+```
+
+```{r}
+# selecting data between transplant and discharge
+
+after_transplant <- which(data_date$OBSERVATION_DTTM >= data_date$TRANSPLANT_DTTM & data_date$OBSERVATION_DTTM <= data_date$DISCHARGE_DATE)
+
+after_transplant_data <- data_date[after_transplant,]
+```
+
+```{r}
+# calculate the time since transplant
+
+time_since_transplant <- as.vector((after_transplant_data$OBSERVATION_DTTM - after_transplant_data$TRANSPLANT_DTTM)/(24*60)) # convert from minutes to days
+
+after_transplant_data$TIME_SINCE_TRANSPLANT <- time_since_transplant
+```
+
+```{r}
+processed_subset_date <- after_transplant_data %>%
+  group_by(PATIENT_ID, ITEM_NAME) %>%
+  summarise(VALUES = list(VALUE), SINCE_TRANSPLANT = list(TIME_SINCE_TRANSPLANT), .groups = "drop")
+
+processed_subset_date <- processed_subset_date[processed_subset_date$ITEM_NAME %in% c("Haemoglobin", "Platelet Count", "Neutrophils"),]
+
+head(processed_subset_date) # SINCE TRANSPLANT column contains the time since transplant of each observation
+```
+
+```{r}
+# filter for patients with less than 30 observations
+
+length_vector <- c()
+
+for(i in unique(processed_subset$PATIENT_ID)){
+  length_vector <- c(length_vector, length(processed_subset[processed_subset$PATIENT_ID == i,]$VALUES[[1]]))
+}
+
+hist(length_vector)
+less_30 <- which(length_vector < 30)
+```
+
+We omit patients that have less than 30 total observations initially as this implies that they would have returned to a different centre for subsequent blood tests. We then fit a smoothing spline and resample from the spline at 30 equally spaced time points.
+
+```{r}
+more_than_30 <- processed_subset_date[!processed_subset_date[[1]] %in% unique(processed_subset$PATIENT_ID)[less_30],]
+
+smoothed_30 <- more_than_30
+
+for(i in 1:dim(more_than_30)[1]){
+  spline_30 <- smooth.spline(more_than_30$SINCE_TRANSPLANT[[i]], more_than_30$VALUES[[i]], spar=0.3)
+  new_x30 <- seq(0, max(more_than_30$SINCE_TRANSPLANT[[i]]), length.out = 30)
+  preds_30 <- predict(spline_30, x = new_x30)$y
+  preds_30[preds_30 < 0] <- 0 # we set anything below 0 to 0
+  smoothed_30$VALUES[[i]] <- preds_30
+}
+```
+
+```{r}
+d1 <- length(unique(smoothed_30$PATIENT_ID)) #no. of patients
+d2 <- length(unique(smoothed_30$ITEM_NAME)) #no. of features/measurements per patient
+d3 <- length(smoothed_30$VALUES[[1]])
+```
+
+```{r}
+cleaned_tensor <- array(NA, dim = c(d1, d2, d3)) #cleaned_tensor[i,j,k] (i corresponds to the different patients, j quantities, k is the time point)
+
+l <- 1
+
+for(i in 1:d1){
+  for(j in 1:d2){
+    cleaned_tensor[i,j,] <- scale(smoothed_30$VALUES[[l]])
+    l <- l + 1
+  }
+}
+
+cleaned_tensor <- as.tensor(cleaned_tensor)
+```
+
+The tensor has been scaled such that each mode-3 fiber has mean 0 and standard deviation equal to 1.
+
+```{r}
+writeMat("stemcell_post_trans.mat", tensor = cleaned_tensor@data)
+```
+

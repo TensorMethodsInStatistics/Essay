@@ -1,0 +1,125 @@
+```{r}
+library(rTensor)
+library(quantmod)
+```
+
+```{r}
+tech_tickers <- c("AAPL", "MSFT", "GOOG", "NVDA", "META", "AMZN", "TSLA", "IBM", "ORCL", "INTC", "NFLX", "PYPL", "ADBE", "CSCO", "QCOM", "TXN", "AMD")
+energy_tickers <- c("XOM", "CVX", "NEE", "SLB", "COP", "EOG", "OXY", "KMI", "VLO", "PSX", "WMB", "LNG", "MPC", "HES", "APA", "TRP", "VST", "FANG")
+financial_tickers <- c("JPM", "BAC", "GS", "MS", "WFC", "C", "AXP", "BLK", "TROW", "SCHW", "PRU", "CME", "MET", "COF", "AIG", "SPGI", "TFC", "TRV")
+
+combined_tickers <- c(tech_tickers, energy_tickers, financial_tickers)
+
+# downloading stock data using the quantmod library
+getSymbols(combined_tickers, src = "yahoo", from = "2023-01-01", to = "2023-12-31")
+```
+
+We now form our tensor by stacking the dataframes.
+
+```{r}
+stockdata <- array(NA, dim = c(length(combined_tickers), 6, 250))
+
+for(i in 1:length(combined_tickers)){
+  stockdata[i,,] <- t(get(combined_tickers[i]))
+}
+stockdata_tensor <- as.tensor(stockdata)
+```
+
+Compute the CP decomposition followed by k-means on on the first factor matrix
+
+```{r}
+set.seed(2025)
+
+for(i in 1:dim(stockdata_tensor)[1]){
+  for(j in 1:dim(stockdata_tensor)[2]){
+    stockdata_tensor[i,j, ] <- scale(stockdata_tensor[i,j, ]@data)
+  }
+}
+
+cp_stocks <- cp(stockdata_tensor, num_components = 14, max_iter = 1000) # 11 and 14 components work best
+
+# extract factor matrices from the CP output
+U1_cp_stocks <- cp_stocks$U[[1]]
+U2_cp_stocks <- cp_stocks$U[[2]]
+U3_cp_stocks <- cp_stocks$U[[3]]
+
+colouring <- c(rep("red", length(tech_tickers)), rep("blue", length(energy_tickers)), rep("green", length(financial_tickers)))
+
+pairs(U1_cp_stocks, col=colouring, pch=19) # colour based on industry
+
+kmeans_res <- kmeans(U1_cp_stocks, centers = 3)
+
+table(Predicted = kmeans_res$cluster, Actual = colouring)
+
+plot(U1_cp_stocks[,1], U1_cp_stocks[,6], col=colouring, pch=19, xlab = "First column of U1", ylab = "Sixth column of U1")
+legend("topleft", legend = c("Technology", "Financial", "Energy"), col = c("red", "green", "blue"), pch=19, cex = 1.5)
+```
+Now, we unfold and conduct PCA, followed by a k-means on the first five PCs.
+
+```{r}
+set.seed(1)
+
+pca_compare <- prcomp(k_unfold(stockdata_tensor, 1)@data, center = TRUE, scale. = TRUE)
+
+pc_result <- pca_compare$x[,1:5]
+
+pairs(pc_result, col=colouring, pch=19)
+
+kmeans_pca <- kmeans(pc_result, centers = 3)
+
+# confusion matrix
+table(Predicted = kmeans_pca$cluster, Actual = colouring)
+```
+Tech stocks are on average trending upwards.
+
+```{r}
+par(mfrow=c(3,3))
+plot(AAPL$AAPL.Open)
+plot(MSFT$MSFT.Open)
+plot(TSLA$TSLA.Open)
+plot(META$META.Open)
+plot(AMZN$AMZN.Open)
+plot(ORCL$ORCL.Open)
+plot(NFLX$NFLX.Open)
+plot(ADBE$ADBE.Open)
+plot(CSCO$CSCO.Open)
+```
+
+Energy stocks show upward trend around July.
+
+```{r}
+par(mfrow=c(3,3))
+plot(XOM$XOM.Open)
+plot(FANG$FANG.Open)
+plot(APA$APA.Open)
+plot(SLB$SLB.Open)
+plot(COP$COP.Open)
+plot(EOG$EOG.Open)
+plot(OXY$OXY.Open)
+plot(KMI$KMI.Open)
+plot(VLO$VLO.Open)
+```
+
+Financial stocks are somewhat steady with a rally towards the end of the year.
+
+```{r}
+par(mfrow=c(3,3))
+plot(JPM$JPM.Open)
+plot(BAC$BAC.Open)
+plot(GS$GS.Open)
+plot(MS$MS.Open)
+plot(WFC$WFC.Open)
+plot(C$C.Open)
+plot(AXP$AXP.Open)
+plot(TROW$TROW.Open)
+plot(MET$MET.Open)
+```
+
+Plotting the first and the third column of the second factor matrix.
+
+```{r}
+par(mfrow=c(1,2))
+plot(U2_cp_stocks[,1], ylab="First Column of U2", pch=19)
+plot(U2_cp_stocks[,3], ylab="Third Column of U2", pch=19)
+```
+

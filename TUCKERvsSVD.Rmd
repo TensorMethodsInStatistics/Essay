@@ -1,0 +1,182 @@
+```{r}
+library(rTensor)
+library(ggplot2)
+```
+
+## Compression
+
+```{r}
+set.seed(2025)
+
+# final dimension of tensor 7x...x7
+dims <- rep(7, 5)
+
+# dimension of core
+core_dims <- rep(2, 5)
+
+# generate the core
+core_tensor <- as.tensor(array(rnorm(prod(core_dims)), dim = core_dims))
+
+# generate factor matrices, populating it with iid N(0,1)
+U_list <- lapply(seq_along(dims), function(i) matrix(rnorm(dims[i] * core_dims[i]), 
+                                                     nrow = dims[i], ncol = core_dims[i]))
+
+# put the tensor together
+tensor_result <- ttl(core_tensor, U_list, seq_along(dims))
+
+print(dim(tensor_result@data))
+```
+
+```{r}
+tucker_decomp <- tucker(tensor_result, ranks = c(2,2,2,2,2))
+tucker_decomp$norm_percent # this outputs 100 as the tucker decomposition is precise
+```
+
+```{r}
+unfold1 <- k_unfold(tensor_result,1) # unfold along first mode
+svd1 <- svd(unfold1@data)
+plot(svd1$d) # only first 2 SVDs are non-zero
+```
+
+```{r}
+k <- 2
+
+# extract first k singular values and vectors
+U_k <- svd1$u[, 1:k, drop = FALSE]
+D_k <- diag(svd1$d[1:k])
+V_k <- svd1$v[, 1:k, drop = FALSE]
+
+# construct the low-rank approximation
+lowrank_approx <- U_k %*% D_k %*% t(V_k)
+
+sum((unfold1@data-lowrank_approx)^2) # this should be approximately zero as only 2 singular values are non-zero
+```
+
+The norm percent is given by
+
+$$100 - 100\times\frac{\| \mathscr{T} - \widehat{\mathscr{T}} \|}{\| \mathscr{T} \|}$$
+
+## Perturbed Tensors
+
+Perturb the entries by $N(0,\sigma^2)$, where $\sigma^2 = 1,2,3,4,5$ and compute the average percentage of norm of the unperturbed tensor explained using SVD and Tucker.
+
+```{r}
+set.seed(2)
+
+average_norm_perc <- c()
+average_norm_perc_svd <- c()
+
+for(j in 1:5){
+  k <- 2
+  norm_explained_svd <- c()
+  
+  norm_explained_original <- c()
+  
+  for(i in 1:100){
+    perturbed_loop <- tensor_result + as.tensor(array(rnorm(7^5, mean = 0, sd = sqrt(j)), dim = c(7,7,7,7,7)))
+    
+    # recovery using tucker decomp
+    tucker_loop <- tucker(perturbed_loop, c(2,2,2,2,2))
+    norm_explained_original <- c(norm_explained_original, 100 - 100*fnorm(tensor_result - tucker_loop$est)/fnorm(tensor_result))
+    
+    # recovery using SVD
+    svd_loop <- svd(k_unfold(perturbed_loop, 1)@data)
+    U_k_loop <- svd_loop$u[, 1:k, drop = FALSE]
+    D_k_loop <- diag(svd_loop$d[1:k])
+    V_k_loop <- svd_loop$v[, 1:k, drop = FALSE]
+    
+    # recover mode-1 unfolding using k singular vectors
+    lowrank_approx_loop <- U_k_loop %*% D_k_loop %*% t(V_k_loop)
+    svd_explained <- 100 - 100*(norm(k_unfold(tensor_result, 1)@data - lowrank_approx_loop, "F")/norm(k_unfold(tensor_result, 1)@data, "F"))
+    norm_explained_svd <- c(norm_explained_svd, svd_explained)
+  }
+  
+  average_norm_perc <- c(average_norm_perc, mean(norm_explained_original))
+  average_norm_perc_svd <- c(average_norm_perc_svd, mean(norm_explained_svd))
+}
+```
+
+We now produce Figure 4 in the essay.
+
+```{r}
+average_norm_perc # percentage norm explained using Tucker
+average_norm_perc_svd # percentage norm explained using SVD
+```
+
+```{r}
+normpercent <- data.frame(
+  Tucker = average_norm_perc,
+  SVD = average_norm_perc_svd,
+  sigma2 = 1:5
+)
+
+ggplot(normpercent, aes(x = sigma2, y = Tucker)) + ylim(75, 100) +
+  geom_point(color = "blue", fill ="blue", size = 2, shape = 21, alpha = 0.9) +
+  geom_line(data = normpercent, aes(x = sigma2, y = Tucker), color = "blue") +
+  geom_point(data = normpercent, aes(x = sigma2, y = SVD), color = "red",
+             fill ="red", size = 2, shape = 21, alpha = 0.9) +
+  geom_line(data = normpercent, aes(x = sigma2, y = SVD), color = "red") +
+  geom_text(data = data.frame(x = normpercent$sigma2[4], 
+                              y = normpercent$Tucker[4], label = "Tucker"),
+            aes(x = x, y = y, label = label), color = "blue", size = 5, 
+            vjust = 1.5, hjust = -0.5) +
+  geom_text(data = data.frame(x = normpercent$sigma2[4], 
+                              y = normpercent$SVD[4], label = "SVD"),
+            aes(x = x, y = y, label = label), color = "red", size = 5, 
+            vjust = 2, hjust = -0.5) +  
+  labs(
+    x = "Variance of Noise",
+    y = "Norm Percent"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.subtitle = element_text(hjust = 0.5),
+    axis.title = element_text(face = "bold"),
+    panel.grid.major = element_line(color = "grey90"),
+    panel.grid.minor = element_blank()
+  )
+```
+
+We now produce Table 3 in the essay.
+
+```{r}
+set.seed(2025)
+
+dimension <- rep(7, 5)
+
+avg_norm <- c()
+avg_unif <- c()
+avg_exp <- c()
+
+for(i in 1:100){
+  normal_tensor <- array(rnorm(prod(dimension)), dimension)
+  normal_tensor <- as.tensor(normal_tensor)
+  
+  tucker_rand_tensor <- tucker(normal_tensor, ranks = rep(6, 5))
+  
+  avg_norm <- c(avg_norm, tucker_rand_tensor$norm_percent)
+}
+
+for(i in 1:100){
+  normal_tensor <- array(runif(prod(dimension)), dimension)
+  normal_tensor <- as.tensor(normal_tensor)
+  
+  tucker_rand_tensor <- tucker(normal_tensor, ranks = rep(6, 5))
+  
+  avg_unif <- c(avg_unif, tucker_rand_tensor$norm_percent)
+}
+
+for(i in 1:100){
+  normal_tensor <- array(rexp(prod(dimension)), dimension)
+  normal_tensor <- as.tensor(normal_tensor)
+  
+  tucker_rand_tensor <- tucker(normal_tensor, ranks = rep(6, 5))
+  
+  avg_exp <- c(avg_exp, tucker_rand_tensor$norm_percent)
+}
+
+mean(avg_norm)
+mean(avg_unif)
+mean(avg_exp)
+```
+
