@@ -27,7 +27,7 @@ The images used in this example may be found in the [Images](Images) folder. The
 ### 4.5 Numerical Experiments for Tensor Completion
 
 [data.mat](data.mat) is the Monkey Brain Machine Interface dataset from [5].  
-[stemcell_post_trans.mat](stemcell_post_trans.mat) is the Stem Cell dataset used the tensor completion numerical experiment. The raw data may be found [here](Post-transplant%20data_anonymised.xlsx) and the pre-processing is done in [TensorProcessingFinal.Rmd](TensorProcessingFinal.Rmd).
+[stemcell_post_trans.mat](stemcell_post_trans.mat) is the Stem Cell dataset used the tensor completion numerical experiment. The raw data may be found [here](Post-transplant%20data_anonymised.xlsx) and the pre-processing is done in [TensorProcessingFinal.Rmd](TensorProcessingFinal.Rmd). We only focused on individuals with more than 30 blood tests as those with less would have continued to have their blood tested at a different centre. We focus on the three measurements of Haemoglobin, Platelet Count and Neutrophils most important to haematologists in research related to engraftment (the process where transplanted cells begin to multiply).
 
 - [CompletionSynthetic.m](CompletionSynthetic.m) contains the codes for Tensor Completion on synthetic data. We use the Tensor Toolbox [3] to generate synthetic low-rank tensors.
 - [DR_TR_monkey.m](DR_TR_monkey.m) contains the codes for the implementation of Douglas-Rachford Tensor Completion and SiLRTCnr on the Monkey BMI dataset [5].
